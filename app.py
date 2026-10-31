@@ -14,7 +14,28 @@ import soundfile as sf
 import streamlit as st
 from pocket_tts import TTSModel
 
+# Private app access
+APP_PASSWORD = st.secrets.get("APP_PASSWORD", "")
 
+if not APP_PASSWORD:
+    st.error("App password is not configured. Contact the app owner.")
+    st.stop()
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("Lenchos Studio")
+    password = st.text_input("Enter your private app password", type="password")
+
+    if st.button("Unlock Studio"):
+        if hmac.compare_digest(password, APP_PASSWORD):
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+
+    st.stop()
 # =========================================================
 # LENCHOS STUDIO
 # =========================================================
