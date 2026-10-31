@@ -1,3 +1,4 @@
+
 import hmac
 import io
 import json
@@ -14,8 +15,26 @@ import soundfile as sf
 import streamlit as st
 from pocket_tts import TTSModel
 
-# Private app access
-APP_PASSWORD = st.secrets.get("APP_PASSWORD", "")
+
+# =========================================================
+# PAGE CONFIGURATION
+# =========================================================
+
+st.set_page_config(
+    page_title="Lenchos Studio",
+    page_icon="🎙️",
+    layout="wide",
+)
+
+
+# =========================================================
+# PRIVATE APP ACCESS
+# =========================================================
+
+try:
+    APP_PASSWORD = str(st.secrets.get("APP_PASSWORD", ""))
+except Exception:
+    APP_PASSWORD = ""
 
 if not APP_PASSWORD:
     st.error("App password is not configured. Contact the app owner.")
@@ -25,10 +44,15 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    st.title("Lenchos Studio")
-    password = st.text_input("Enter your private app password", type="password")
+    st.title("🎙️ Lenchos Studio")
+    st.caption("Your private AI voice library and conversation studio.")
 
-    if st.button("Unlock Studio"):
+    password = st.text_input(
+        "Enter your private app password",
+        type="password",
+    )
+
+    if st.button("Unlock Studio", type="primary"):
         if hmac.compare_digest(password, APP_PASSWORD):
             st.session_state.authenticated = True
             st.rerun()
@@ -36,18 +60,6 @@ if not st.session_state.authenticated:
             st.error("Incorrect password.")
 
     st.stop()
-# =========================================================
-# LENCHOS STUDIO
-# =========================================================
-
-st.set_page_config(
-    page_title="Lenchos Studio",
-    page_icon="🎙️",
-    layout="wide",
-)
-
-st.title("🎙️ Lenchos Studio")
-st.caption("Your permanent AI voice library and conversation studio.")
 
 
 # =========================================================
@@ -72,12 +84,20 @@ BUILTIN_VOICES = {
 }
 
 
+# =========================================================
+# SUPABASE CONFIGURATION
+# =========================================================
+
 def get_supabase_config():
     try:
-        return (
-            st.secrets["SUPABASE_URL"].rstrip("/"),
-            st.secrets["SUPABASE_SERVICE_ROLE_KEY"],
-        )
+        base_url = str(st.secrets["SUPABASE_URL"]).rstrip("/")
+        key = str(st.secrets["SUPABASE_SERVICE_ROLE_KEY"])
+
+        if not base_url or not key:
+            return None, None
+
+        return base_url, key
+
     except Exception:
         return None, None
 
@@ -90,26 +110,56 @@ def storage_headers(key, content_type="application/octet-stream"):
     }
 
 
-def object_url(base, bucket, path, authenticated=False):
-    endpoint = "object/authenticated" if authenticated else "object"
+def object_url(base, bucket, path):
+    encoded_bucket = quote(bucket, safe="")
+    encoded_path = quote(path, safe="/")
+
     return (
-        f"{base}/storage/v1/{endpoint}/"
-        f"{quote(bucket, safe='')}/{quote(path, safe='/')}"
+        f"{base}/storage/v1/object/"
+        f"{encoded_bucket}/{encoded_path}"
     )
 
 
-def download_object(path):
-    url = f"{SUPABASE_URL}/storage/v1/object/authenticated/{BUCKET_NAME}/{path}"
+def is_missing_object(response):
+    """Identify a missing object without hiding other storage errors."""
+
+    if response.status_code == 404:
+        return True
+
+    if response.status_code != 400:
+        return False
+
+    message = response.text.lower()
+
+    missing_messages = [
+        "object not found",
+        "object does not exist",
+        "no such key",
+        "not found",
+    ]
+
+    return any(item in message for item in missing_messages)
+
+
+def download_object(path, missing_ok=False):
+    base, key = get_supabase_config()
+
+    if not base or not key:
+        raise RuntimeError("Supabase storage is not configured.")
 
     response = requests.get(
-        url,
-        headers=supabase_headers(),
-        timeout=30,
+        object_url(base, BUCKET, path),
+        headers=storage_headers(key),
+        timeout=60,
     )
+
+    if is_missing_object(response) and missing_ok:
+        return None
 
     if not response.ok:
         raise RuntimeError(
-            f"Supabase returned HTTP {response.status_code}: {response.text}"
+            f"Supabase download failed "
+            f"(HTTP {response.status_code}): {response.text}"
         )
 
     return response.content
@@ -131,7 +181,11 @@ def upload_object(path, data, content_type="application/octet-stream"):
         timeout=120,
     )
 
-    response.raise_for_status()
+    if not response.ok:
+        raise RuntimeError(
+            f"Supabase upload failed "
+            f"(HTTP {response.status_code}): {response.text}"
+        )
 
 
 def delete_object(path):
@@ -141,7 +195,7 @@ def delete_object(path):
         raise RuntimeError("Supabase storage is not configured.")
 
     response = requests.delete(
-        f"{base}/storage/v1/object/{BUCKET}",
+        f"{base}/storage/v1/object/{quote(BUCKET, safe='')}",
         headers={
             "apikey": key,
             "Authorization": f"Bearer {key}",
@@ -151,7 +205,11 @@ def delete_object(path):
         timeout=60,
     )
 
-    response.raise_for_status()
+    if not response.ok:
+        raise RuntimeError(
+            f"Supabase deletion failed "
+            f"(HTTP {response.status_code}): {response.text}"
+        )
 
 
 # =========================================================
@@ -159,27 +217,42 @@ def delete_object(path):
 # =========================================================
 
 def load_library():
+    data = download_object(LIBRARY_FILE, missing_ok=True)
+
+    # The first visit will not have a library.json yet.
+    if data is None:
+        return []
+
     try:
-        data = download_object(LIBRARY_FILE)
-        return json.loads(data.decode("utf-8"))
-    except requests.HTTPError as error:
-        if error.response is not None and error.response.status_code == 404:
-            return []
-        raise
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        raise RuntimeError("The voice library index is invalid.")
+        voices = json.loads(data.decode("utf-8"))
+
+        if not isinstance(voices, list):
+            raise ValueError("Library data must be a list.")
+
+        return voices
+
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        raise RuntimeError(
+            "Your saved voice library index is invalid."
+        )
 
 
 def save_library(voices):
+    data = json.dumps(
+        voices,
+        indent=2,
+        ensure_ascii=False,
+    ).encode("utf-8")
+
     upload_object(
         LIBRARY_FILE,
-        json.dumps(voices, indent=2).encode("utf-8"),
+        data,
         "application/json",
     )
 
 
 # =========================================================
-# MODEL
+# POCKET TTS MODEL
 # =========================================================
 
 @st.cache_resource
@@ -195,33 +268,37 @@ def load_builtin_state(voice_id):
 @st.cache_resource
 def load_custom_state(audio_bytes):
     model = load_model()
-    path = None
+    temp_path = None
 
     try:
         with tempfile.NamedTemporaryFile(
             suffix=".wav",
             delete=False,
-        ) as file:
-            file.write(audio_bytes)
-            path = file.name
+        ) as temp:
+            temp.write(audio_bytes)
+            temp_path = temp.name
 
-        return model.get_state_for_audio_prompt(path)
+        return model.get_state_for_audio_prompt(temp_path)
 
     finally:
-        if path and os.path.exists(path):
-            os.remove(path)
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 def get_voice_state(voice_key, library):
     if voice_key.startswith("builtin:"):
         voice_id = voice_key.split(":", 1)[1]
+
+        if voice_id not in BUILTIN_VOICES:
+            raise ValueError("Unknown built-in voice.")
+
         return load_builtin_state(voice_id)
 
     if voice_key.startswith("custom:"):
         voice_id = voice_key.split(":", 1)[1]
 
         voice = next(
-            (v for v in library if v["id"] == voice_id),
+            (item for item in library if item["id"] == voice_id),
             None,
         )
 
@@ -229,6 +306,7 @@ def get_voice_state(voice_key, library):
             raise ValueError("This saved voice no longer exists.")
 
         audio_bytes = download_object(voice["file"])
+
         return load_custom_state(audio_bytes)
 
     raise ValueError("Invalid voice selection.")
@@ -239,9 +317,7 @@ def get_voice_state(voice_key, library):
 # =========================================================
 
 def generate_audio(state, text):
-    model = load_model()
-
-    audio = model.generate_audio(
+    audio = load_model().generate_audio(
         state,
         text,
         copy_state=True,
@@ -274,7 +350,7 @@ def make_wav(audio, sample_rate):
 
 
 # =========================================================
-# SCRIPT PARSER
+# CONVERSATION SCRIPT PARSER
 # =========================================================
 
 def parse_script(script):
@@ -314,14 +390,14 @@ def parse_script(script):
     if not turns:
         raise ValueError("Your script is empty.")
 
-    if {t["speaker"] for t in turns} != {"A", "B"}:
+    if {turn["speaker"] for turn in turns} != {"A", "B"}:
         raise ValueError("Include at least one A: and one B: turn.")
 
     return turns
 
 
 # =========================================================
-# LOAD LIBRARY
+# LOAD STORAGE AND LIBRARY
 # =========================================================
 
 base_url, api_key = get_supabase_config()
@@ -330,21 +406,32 @@ storage_ready = bool(base_url and api_key)
 if storage_ready:
     try:
         library = load_library()
+
     except Exception as error:
         library = []
         st.error("Could not load your saved voice library.")
         st.exception(error)
+        st.stop()
+
 else:
     library = []
 
 
 # =========================================================
-# NAVIGATION
+# APP HEADER AND NAVIGATION
 # =========================================================
+
+st.title("🎙️ Lenchos Studio")
+st.caption(
+    "Your permanent AI voice library and conversation studio."
+)
 
 page = st.radio(
     "Navigation",
-    ["💬 Conversation Studio", "🎭 Voice Library"],
+    [
+        "💬 Conversation Studio",
+        "🎭 Voice Library",
+    ],
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -357,7 +444,10 @@ st.divider()
 # =========================================================
 
 def voice_options():
-    result = ["builtin:" + v for v in BUILTIN_VOICES]
+    result = [
+        "builtin:" + voice_id
+        for voice_id in BUILTIN_VOICES
+    ]
 
     for voice in library:
         result.append("custom:" + voice["id"])
@@ -369,12 +459,13 @@ def voice_label(key):
     if key.startswith("builtin:"):
         voice_id = key.split(":", 1)[1]
         name, gender, description = BUILTIN_VOICES[voice_id]
+
         return f"{name} ({gender}) — {description}"
 
     voice_id = key.split(":", 1)[1]
 
     voice = next(
-        v for v in library if v["id"] == voice_id
+        item for item in library if item["id"] == voice_id
     )
 
     return (
@@ -393,13 +484,14 @@ if page == "🎭 Voice Library":
 
     if not storage_ready:
         st.warning(
-            "Persistent storage is not connected yet. "
-            "Complete the Supabase setup before saving voices."
+            "Persistent storage is not connected. "
+            "Check your Supabase credentials in Streamlit Secrets."
         )
+        st.stop()
 
     st.write(
-        "Clone a voice once, save it, and reuse it whenever "
-        "you create a conversation."
+        "Clone a voice once, save it, and reuse it "
+        "whenever you create a conversation."
     )
 
     st.subheader("Add a new voice")
@@ -407,7 +499,7 @@ if page == "🎭 Voice Library":
     uploaded = st.file_uploader(
         "Upload a clear voice recording",
         type=["wav"],
-        help="WAV only. Use a clean recording of up to 30 seconds.",
+        help="Upload a clean WAV recording of up to 30 seconds.",
     )
 
     if uploaded:
@@ -453,18 +545,20 @@ if page == "🎭 Voice Library":
             st.warning("Please confirm permission to clone this voice.")
 
         elif any(
-            v["name"].lower() == name.strip().lower()
-            for v in library
+            voice["name"].lower() == name.strip().lower()
+            for voice in library
         ):
             st.warning("A voice with this name already exists.")
 
         else:
+            temp_path = None
+
             try:
                 with st.spinner("Processing and saving your voice..."):
 
                     raw_audio = uploaded.getvalue()
 
-                    audio, sr = sf.read(
+                    audio, sample_rate = sf.read(
                         io.BytesIO(raw_audio),
                         dtype="float32",
                     )
@@ -475,18 +569,21 @@ if page == "🎭 Voice Library":
                     if len(audio) == 0:
                         raise ValueError("The recording is empty.")
 
-                    if sr != 24000:
+                    if sample_rate != 24000:
                         audio = librosa.resample(
                             audio,
-                            orig_sr=sr,
+                            orig_sr=sample_rate,
                             target_sr=24000,
                         )
-                        sr = 24000
+                        sample_rate = 24000
 
-                    # Use at most the first 30 seconds.
-                    audio = audio[: int(sr * 30)]
+                    # Keep only the first 30 seconds.
+                    audio = audio[: int(sample_rate * 30)]
 
-                    normalized_wav = make_wav(audio, sr)
+                    if len(audio) == 0:
+                        raise ValueError("The recording is too short.")
+
+                    normalized_wav = make_wav(audio, sample_rate)
 
                     # Verify Pocket TTS can process the recording.
                     with tempfile.NamedTemporaryFile(
@@ -497,14 +594,17 @@ if page == "🎭 Voice Library":
                         temp_path = temp.name
 
                     try:
-                        model = load_model()
-                        model.get_state_for_audio_prompt(temp_path)
+                        load_model().get_state_for_audio_prompt(temp_path)
+
                     finally:
-                        os.remove(temp_path)
+                        if temp_path and os.path.exists(temp_path):
+                            os.remove(temp_path)
+                            temp_path = None
 
                     voice_id = str(uuid.uuid4())
                     file_path = f"voices/{voice_id}.wav"
 
+                    # Save the original recording to Supabase.
                     upload_object(
                         file_path,
                         normalized_wav,
@@ -522,11 +622,12 @@ if page == "🎭 Voice Library":
                         "file": file_path,
                     }
 
-                    library.append(new_voice)
-                    save_library(library)
+                    updated_library = library + [new_voice]
+
+                    save_library(updated_library)
 
                 st.success(
-                    f"{name.strip()} has been saved to your permanent library!"
+                    f"{name.strip()} has been saved permanently!"
                 )
 
                 st.rerun()
@@ -534,6 +635,10 @@ if page == "🎭 Voice Library":
             except Exception as error:
                 st.error("Voice cloning or saving failed.")
                 st.exception(error)
+
+            finally:
+                if temp_path and os.path.exists(temp_path):
+                    os.remove(temp_path)
 
     # -----------------------------------------------------
     # SAVED VOICES
@@ -543,7 +648,10 @@ if page == "🎭 Voice Library":
     st.subheader(f"Saved voices ({len(library)})")
 
     if not library:
-        st.info("Your permanent voice library is currently empty.")
+        st.info(
+            "Your permanent voice library is currently empty. "
+            "Add your first voice above."
+        )
 
     for voice in library:
 
@@ -559,7 +667,7 @@ if page == "🎭 Voice Library":
             ):
 
                 try:
-                    with st.spinner("Generating preview..."):
+                    with st.spinner("Generating voice preview..."):
 
                         state = get_voice_state(
                             "custom:" + voice["id"],
@@ -599,12 +707,12 @@ if page == "🎭 Voice Library":
                 try:
                     delete_object(voice["file"])
 
-                    library = [
-                        v for v in library
-                        if v["id"] != voice["id"]
+                    updated_library = [
+                        item for item in library
+                        if item["id"] != voice["id"]
                     ]
 
-                    save_library(library)
+                    save_library(updated_library)
 
                     st.success("Voice deleted from your library.")
                     st.rerun()
@@ -624,13 +732,17 @@ elif page == "💬 Conversation Studio":
 
     if not storage_ready:
         st.info(
-            "Built-in voices are available now. "
+            "Built-in voices are available. "
             "Connect Supabase to use permanently saved cloned voices."
         )
 
     options = voice_options()
 
     col_a, col_b = st.columns(2)
+
+    # -----------------------------------------------------
+    # SPEAKER A
+    # -----------------------------------------------------
 
     with col_a:
 
@@ -645,10 +757,11 @@ elif page == "💬 Conversation Studio":
 
         speed_a = st.slider(
             "Speaking speed A",
-            0.75,
-            1.35,
-            1.0,
-            0.05,
+            min_value=0.75,
+            max_value=1.35,
+            value=1.0,
+            step=0.05,
+            key="speed_a",
         )
 
         if st.button("▶ Preview A", use_container_width=True):
@@ -669,11 +782,15 @@ elif page == "💬 Conversation Studio":
                 )
 
             except Exception as error:
-                st.error("Preview failed.")
+                st.error("Preview A failed.")
                 st.exception(error)
 
         if "preview_a" in st.session_state:
             st.audio(st.session_state["preview_a"])
+
+    # -----------------------------------------------------
+    # SPEAKER B
+    # -----------------------------------------------------
 
     with col_b:
 
@@ -689,10 +806,11 @@ elif page == "💬 Conversation Studio":
 
         speed_b = st.slider(
             "Speaking speed B",
-            0.75,
-            1.35,
-            1.0,
-            0.05,
+            min_value=0.75,
+            max_value=1.35,
+            value=1.0,
+            step=0.05,
+            key="speed_b",
         )
 
         if st.button("▶ Preview B", use_container_width=True):
@@ -713,11 +831,15 @@ elif page == "💬 Conversation Studio":
                 )
 
             except Exception as error:
-                st.error("Preview failed.")
+                st.error("Preview B failed.")
                 st.exception(error)
 
         if "preview_b" in st.session_state:
             st.audio(st.session_state["preview_b"])
+
+    # -----------------------------------------------------
+    # CONVERSATION SCRIPT
+    # -----------------------------------------------------
 
     st.divider()
     st.subheader("Write your script")
@@ -744,10 +866,11 @@ B: Sounds amazing!""",
 
             model = load_model()
 
-            states = {
-                "A": get_voice_state(voice_a, library),
-                "B": get_voice_state(voice_b, library),
-            }
+            with st.spinner("Loading selected voices..."):
+                states = {
+                    "A": get_voice_state(voice_a, library),
+                    "B": get_voice_state(voice_b, library),
+                }
 
             speeds = {
                 "A": speed_a,
@@ -756,18 +879,21 @@ B: Sounds amazing!""",
 
             parts = []
 
-            sr = model.sample_rate
-            silence = np.zeros(int(sr * 0.25), dtype=np.float32)
+            sample_rate = model.sample_rate
+            silence = np.zeros(
+                int(sample_rate * 0.25),
+                dtype=np.float32,
+            )
 
             progress = st.progress(0)
             status = st.empty()
 
-            for i, turn in enumerate(turns):
+            for index, turn in enumerate(turns):
 
                 speaker = turn["speaker"]
 
                 status.write(
-                    f"Generating turn {i + 1}/{len(turns)} "
+                    f"Generating turn {index + 1}/{len(turns)} "
                     f"— Speaker {speaker}"
                 )
 
@@ -783,18 +909,22 @@ B: Sounds amazing!""",
 
                 parts.append(audio)
 
-                if i < len(turns) - 1:
+                if index < len(turns) - 1:
                     parts.append(silence)
 
-                progress.progress((i + 1) / len(turns))
+                progress.progress(
+                    (index + 1) / len(turns)
+                )
 
             status.write("Combining conversation...")
 
             final_audio = np.concatenate(parts)
-            wav = make_wav(final_audio, sr)
+            wav = make_wav(final_audio, sample_rate)
 
             st.session_state["final_audio"] = wav
-            st.session_state["final_duration"] = len(final_audio) / sr
+            st.session_state["final_duration"] = (
+                len(final_audio) / sample_rate
+            )
 
             progress.empty()
             status.empty()
@@ -804,6 +934,10 @@ B: Sounds amazing!""",
         except Exception as error:
             st.error("Conversation generation failed.")
             st.exception(error)
+
+    # -----------------------------------------------------
+    # FINAL AUDIO
+    # -----------------------------------------------------
 
     if st.session_state.get("final_audio"):
 
