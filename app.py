@@ -110,7 +110,10 @@ def download_object(path):
         timeout=60,
     )
 
-    response.raise_for_status()
+   if not response.ok:
+    raise RuntimeError(
+        f"Supabase returned HTTP {response.status_code}: {response.text}"
+    )
     return response.content
 
 
