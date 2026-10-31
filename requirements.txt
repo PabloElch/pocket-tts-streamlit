@@ -3,3 +3,4 @@ pocket-tts
 soundfile
 numpy
 librosa
+requests
