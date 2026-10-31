@@ -1,0 +1,4 @@
+streamlit
+pocket-tts
+soundfile
+numpy
