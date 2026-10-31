@@ -69,8 +69,8 @@ if st.button("Generate speech", type="primary", use_container_width=True):
                     script.strip(),
                 )
 
-                audio_np = audio.detach().cpu().numpy()
-                 sample_rate = model.sample_rate
+                                audio_np = audio.detach().cpu().numpy()
+                sample_rate = model.sample_rate
 
                 buffer = io.BytesIO()
                 sf.write(buffer, audio_np, sample_rate, format="WAV")
