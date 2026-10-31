@@ -2,3 +2,4 @@ streamlit
 pocket-tts
 soundfile
 numpy
+librosa
