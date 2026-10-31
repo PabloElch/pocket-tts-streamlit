@@ -9,23 +9,79 @@ import streamlit as st
 from pocket_tts import TTSModel
 
 
-# --------------------------------------------------
-# PAGE CONFIGURATION
-# --------------------------------------------------
+# ==================================================
+# LENCHOS STUDIO
+# ==================================================
 
 st.set_page_config(
-    page_title="Pocket TTS Conversation Studio",
+    page_title="Lenchos Studio",
     page_icon="🎙️",
-    layout="centered",
+    layout="wide",
 )
 
-st.title("🎙️ Pocket TTS Conversation Studio")
-st.caption("Create natural two-person conversations from text.")
+st.title("🎙️ Lenchos Studio")
+st.caption("Two voices. One conversation. Your own audio studio.")
+
+# ==================================================
+# VOICE LIBRARY
+# ==================================================
+
+VOICES = {
+    "alba": {
+        "name": "Alba",
+        "gender": "F",
+        "description": "Clear, natural female voice",
+    },
+    "marius": {
+        "name": "Marius",
+        "gender": "M",
+        "description": "Warm, masculine voice",
+    },
+    "javert": {
+        "name": "Javert",
+        "gender": "M",
+        "description": "Deep, authoritative male voice",
+    },
+    "jean": {
+        "name": "Jean",
+        "gender": "M",
+        "description": "Gentle male voice",
+    },
+    "fantine": {
+        "name": "Fantine",
+        "gender": "F",
+        "description": "Soft, feminine voice",
+    },
+    "cosette": {
+        "name": "Cosette",
+        "gender": "F",
+        "description": "Young-sounding female voice",
+    },
+    "eponine": {
+        "name": "Eponine",
+        "gender": "F",
+        "description": "Expressive female voice",
+    },
+    "azelma": {
+        "name": "Azelma",
+        "gender": "F",
+        "description": "Bright female voice",
+    },
+}
 
 
-# --------------------------------------------------
-# MODEL AND VOICE LOADING
-# --------------------------------------------------
+def voice_label(voice_id):
+    voice = VOICES[voice_id]
+
+    return (
+        f"{voice['name']} ({voice['gender']}) "
+        f"— {voice['description']}"
+    )
+
+
+# ==================================================
+# MODEL LOADING
+# ==================================================
 
 @st.cache_resource
 def load_model():
@@ -33,30 +89,62 @@ def load_model():
 
 
 @st.cache_resource
-def load_voice_state(voice_name):
+def load_voice_state(voice_id):
     model = load_model()
-    return model.get_state_for_audio_prompt(voice_name)
+    return model.get_state_for_audio_prompt(voice_id)
 
 
-# --------------------------------------------------
-# AVAILABLE VOICES
-# --------------------------------------------------
+# ==================================================
+# AUDIO GENERATION
+# ==================================================
 
-VOICES = [
-    "alba",
-    "marius",
-    "javert",
-    "jean",
-    "fantine",
-    "cosette",
-    "eponine",
-    "azelma",
-]
+def generate_audio(voice_id, text):
+    model = load_model()
+    voice_state = load_voice_state(voice_id)
+
+    audio_tensor = model.generate_audio(
+        voice_state,
+        text,
+        copy_state=True,
+    )
+
+    audio = (
+        audio_tensor
+        .detach()
+        .cpu()
+        .numpy()
+        .astype(np.float32)
+    )
+
+    return audio, model.sample_rate
 
 
-# --------------------------------------------------
+def change_speed(audio, speed):
+    if abs(speed - 1.0) < 0.001:
+        return audio
+
+    return librosa.effects.time_stretch(
+        y=audio,
+        rate=speed,
+    )
+
+
+def make_wav(audio, sample_rate):
+    buffer = io.BytesIO()
+
+    sf.write(
+        buffer,
+        audio,
+        sample_rate,
+        format="WAV",
+    )
+
+    return buffer.getvalue()
+
+
+# ==================================================
 # SCRIPT PARSER
-# --------------------------------------------------
+# ==================================================
 
 def parse_script(script):
     turns = []
@@ -68,77 +156,65 @@ def parse_script(script):
         if not line:
             continue
 
-        match = re.match(r"^([AB])\s*:\s*(.*)$", line, re.IGNORECASE)
+        match = re.match(
+            r"^([AB])\s*:\s*(.*)$",
+            line,
+            re.IGNORECASE,
+        )
 
         if match:
-            speaker = match.group(1).upper()
-            text = match.group(2).strip()
+            current_speaker = match.group(1).upper()
+            content = match.group(2).strip()
 
-            if text:
+            if content:
                 turns.append({
-                    "speaker": speaker,
-                    "text": text,
+                    "speaker": current_speaker,
+                    "text": content,
                 })
-
-            current_speaker = speaker
 
         elif current_speaker and turns:
             turns[-1]["text"] += " " + line
 
         else:
             raise ValueError(
-                "Every line must start with A: or B:. "
-                "Continuation lines are allowed after a speaker label."
+                "Every new conversation turn must begin with A: or B:."
             )
 
     if not turns:
         raise ValueError("Your script is empty.")
 
-    speakers_used = {turn["speaker"] for turn in turns}
+    speakers = {turn["speaker"] for turn in turns}
 
-    if speakers_used != {"A", "B"}:
+    if speakers != {"A", "B"}:
         raise ValueError(
-            "Your script must contain at least one A: turn "
-            "and one B: turn."
+            "Please include at least one A: turn and one B: turn."
         )
 
     return turns
 
 
-# --------------------------------------------------
-# AUDIO SPEED ADJUSTMENT
-# --------------------------------------------------
+# ==================================================
+# SPEAKER CONFIGURATION
+# ==================================================
 
-def adjust_speed(audio, speed):
-    if speed == 1.0:
-        return audio
-
-    return librosa.effects.time_stretch(
-        y=audio.astype(np.float32),
-        rate=speed,
-    )
-
-
-# --------------------------------------------------
-# INTERFACE: SPEAKER SETTINGS
-# --------------------------------------------------
-
-st.subheader("1. Configure your speakers")
+st.divider()
+st.header("1. Configure your voices")
 
 col_a, col_b = st.columns(2)
 
 with col_a:
-    st.markdown("### 🅰️ Speaker A")
+    st.subheader("🅰️ Speaker A")
 
     voice_a = st.selectbox(
-        "Choose A's voice",
-        VOICES,
+        "Choose Speaker A's voice",
+        options=list(VOICES.keys()),
         index=0,
+        format_func=voice_label,
         key="voice_a",
     )
 
     speed_a = st.slider(
-        "A's speaking speed",
+        "Speaking speed — A",
         min_value=0.75,
         max_value=1.35,
         value=1.0,
@@ -146,18 +222,47 @@ with col_a:
         key="speed_a",
     )
 
+    if st.button(
+        "▶ Preview Speaker A",
+        use_container_width=True,
+        key="preview_a",
+    ):
+        try:
+            with st.spinner("Generating Speaker A preview..."):
+                audio, sr = generate_audio(
+                    voice_a,
+                    "Hello! Welcome to Lenchos Studio. "
+                    "This is a preview of my voice.",
+                )
+
+                audio = change_speed(audio, speed_a)
+
+                st.session_state["preview_a_audio"] = make_wav(
+                    audio, sr
+                )
+
+        except Exception as error:
+            st.error(f"Preview failed: {error}")
+
+    if "preview_a_audio" in st.session_state:
+        st.audio(
+            st.session_state["preview_a_audio"],
+            format="audio/wav",
+        )
+
 with col_b:
-    st.markdown("### 🅱️ Speaker B")
+    st.subheader("🅱️ Speaker B")
 
     voice_b = st.selectbox(
-        "Choose B's voice",
-        VOICES,
+        "Choose Speaker B's voice",
+        options=list(VOICES.keys()),
         index=1,
+        format_func=voice_label,
         key="voice_b",
     )
 
     speed_b = st.slider(
-        "B's speaking speed",
+        "Speaking speed — B",
         min_value=0.75,
         max_value=1.35,
         value=1.0,
@@ -165,44 +270,76 @@ with col_b:
         key="speed_b",
     )
 
+    if st.button(
+        "▶ Preview Speaker B",
+        use_container_width=True,
+        key="preview_b",
+    ):
+        try:
+            with st.spinner("Generating Speaker B preview..."):
+                audio, sr = generate_audio(
+                    voice_b,
+                    "Hello! It's great to meet you. "
+                    "This is my voice preview.",
+                )
 
-# --------------------------------------------------
-# INTERFACE: SCRIPT
-# --------------------------------------------------
+                audio = change_speed(audio, speed_b)
+
+                st.session_state["preview_b_audio"] = make_wav(
+                    audio, sr
+                )
+
+        except Exception as error:
+            st.error(f"Preview failed: {error}")
+
+    if "preview_b_audio" in st.session_state:
+        st.audio(
+            st.session_state["preview_b_audio"],
+            format="audio/wav",
+        )
+
+
+# ==================================================
+# CONVERSATION SCRIPT
+# ==================================================
 
 st.divider()
-st.subheader("2. Write your conversation")
+st.header("2. Write your conversation")
 
 default_script = """A: Hey! How are you doing today?
 B: I'm doing great! What about you?
-A: I'm good too. Have you heard about Pocket TTS?
-B: Yes! It can generate speech using different voices.
-A: Exactly. We can use it to create our own conversations.
-B: That's actually pretty impressive!"""
+A: I'm good too. Have you heard about Lenchos Studio?
+B: Yes! It can turn a written conversation into two-person audio.
+A: Exactly. We can choose different voices for each speaker.
+B: That's impressive! Let's create something amazing."""
 
 script = st.text_area(
-    "Conversation script",
+    "Your conversation",
     value=default_script,
-    height=280,
-    help="Start each new turn with A: or B:. "
-         "Continuation lines belong to the previous speaker.",
+    height=300,
+    help="Use A: and B: to identify the speakers.",
 )
 
-st.caption(
-    "Example: A: Hello!  |  B: Hi! "
-    "The app generates each turn in the order you write it."
+st.markdown("**Script format example:**")
+
+st.code(
+    """A: Hello! How are you?
+B: I'm doing well, thank you.
+A: What are you working on?
+B: I'm creating a podcast.""",
+    language="text",
 )
 
 
-# --------------------------------------------------
-# GENERATE CONVERSATION
-# --------------------------------------------------
+# ==================================================
+# GENERATE FULL CONVERSATION
+# ==================================================
 
 st.divider()
-st.subheader("3. Generate your conversation")
+st.header("3. Generate your conversation")
 
 if st.button(
-    "🎙️ Generate full conversation",
+    "🎙️ Generate Full Conversation",
     type="primary",
     use_container_width=True,
 ):
@@ -212,52 +349,42 @@ if st.button(
 
         model = load_model()
 
-        st.info(f"Generating {len(turns)} conversation turns...")
+        sample_rate = model.sample_rate
 
-        progress = st.progress(0)
-        status = st.empty()
-
-        # Load both voice states once.
-        status.write("Loading Speaker A and Speaker B voices...")
-
-        state_a = load_voice_state(voice_a)
-        state_b = load_voice_state(voice_b)
-
-        voice_states = {
-            "A": state_a,
-            "B": state_b,
+        states = {
+            "A": load_voice_state(voice_a),
+            "B": load_voice_state(voice_b),
         }
 
-        voice_speeds = {
+        speeds = {
             "A": speed_a,
             "B": speed_b,
         }
 
-        audio_segments = []
+        audio_parts = []
 
-        sample_rate = model.sample_rate
-
-        # Small silence between conversation turns.
-        pause_duration = 0.25
-        silence = np.zeros(
-            int(sample_rate * pause_duration),
+        pause = np.zeros(
+            int(sample_rate * 0.25),
             dtype=np.float32,
         )
 
-        # Generate every speaker turn in order.
+        progress = st.progress(0)
+        status = st.empty()
+
         for index, turn in enumerate(turns):
 
             speaker = turn["speaker"]
             text = turn["text"]
 
             status.write(
-                f"Generating turn {index + 1}/{len(turns)} "
-                f"— Speaker {speaker}..."
+                f"Generating turn {index + 1} of {len(turns)} "
+                f"— Speaker {speaker}"
             )
 
             audio_tensor = model.generate_audio(
-                voice_states[speaker],
+                states[speaker],
                 text,
+                copy_state=True,
             )
 
             audio = (
@@ -268,39 +395,31 @@ if st.button(
                 .astype(np.float32)
             )
 
-            # Apply this speaker's individual speed.
-            audio = adjust_speed(
+            audio = change_speed(
                 audio,
-                voice_speeds[speaker],
+                speeds[speaker],
             )
 
-            audio_segments.append(audio)
-            audio_segments.append(silence)
+            audio_parts.append(audio)
+
+            if index < len(turns) - 1:
+                audio_parts.append(pause)
 
             progress.progress(
                 (index + 1) / len(turns)
             )
 
-        # Merge all turns into one audio file.
-        status.write("Combining all conversation turns...")
+        status.write("Combining the conversation...")
 
-        final_audio = np.concatenate(audio_segments)
+        final_audio = np.concatenate(audio_parts)
 
-        # Convert generated audio into WAV.
-        output_buffer = io.BytesIO()
-
-        sf.write(
-            output_buffer,
+        wav_bytes = make_wav(
             final_audio,
             sample_rate,
-            format="WAV",
         )
 
-        wav_bytes = output_buffer.getvalue()
-
-        # Save results in session state.
-        st.session_state["conversation_audio"] = wav_bytes
-        st.session_state["conversation_duration"] = (
+        st.session_state["final_audio"] = wav_bytes
+        st.session_state["final_duration"] = (
             len(final_audio) / sample_rate
         )
 
@@ -314,40 +433,42 @@ if st.button(
         st.exception(error)
 
 
-# --------------------------------------------------
-# FINAL AUDIO PLAYER AND DOWNLOAD
-# --------------------------------------------------
+# ==================================================
+# FINAL AUDIO
+# ==================================================
 
-if "conversation_audio" in st.session_state:
+if "final_audio" in st.session_state:
 
     st.divider()
-    st.subheader("4. Your completed conversation")
+    st.header("4. Your finished conversation")
 
-    duration = st.session_state["conversation_duration"]
+    duration = st.session_state["final_duration"]
 
-    st.caption(f"Duration: {duration:.1f} seconds")
+    st.metric(
+        "Audio duration",
+        f"{duration:.1f} seconds",
+    )
 
     st.audio(
-        st.session_state["conversation_audio"],
+        st.session_state["final_audio"],
         format="audio/wav",
     )
 
     st.download_button(
-        label="⬇️ Download complete conversation",
-        data=st.session_state["conversation_audio"],
-        file_name="pocket_tts_conversation.wav",
+        "⬇️ Download Final Conversation (WAV)",
+        data=st.session_state["final_audio"],
+        file_name="lenchos_studio_conversation.wav",
         mime="audio/wav",
         use_container_width=True,
     )
 
 
-# --------------------------------------------------
+# ==================================================
 # FOOTER
-# --------------------------------------------------
+# ==================================================
 
 st.divider()
 
 st.caption(
-    "Powered by Kyutai Pocket TTS. "
-    "Generation runs on the hosting server's CPU."
+    "Lenchos Studio | Powered by Kyutai Pocket TTS"
 )
