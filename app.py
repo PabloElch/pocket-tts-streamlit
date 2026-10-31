@@ -99,21 +99,19 @@ def object_url(base, bucket, path, authenticated=False):
 
 
 def download_object(path):
-    base, key = get_supabase_config()
-
-    if not base or not key:
-        raise RuntimeError("Supabase storage is not configured.")
+    url = f"{SUPABASE_URL}/storage/v1/object/authenticated/{BUCKET_NAME}/{path}"
 
     response = requests.get(
-        object_url(base, BUCKET, path, authenticated=True),
-        headers=storage_headers(key),
-        timeout=60,
+        url,
+        headers=supabase_headers(),
+        timeout=30,
     )
 
-   if not response.ok:
-    raise RuntimeError(
-        f"Supabase returned HTTP {response.status_code}: {response.text}"
-    )
+    if not response.ok:
+        raise RuntimeError(
+            f"Supabase returned HTTP {response.status_code}: {response.text}"
+        )
+
     return response.content
 
 
