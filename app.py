@@ -1,4 +1,3 @@
-
 import hmac
 import io
 import json
@@ -930,7 +929,7 @@ B: Sounds amazing!""",
                     (index + 1) / len(turns)
                 )
 
-                        status.write("Combining conversation...")
+            status.write("Combining conversation...")
 
             final_audio = np.concatenate(parts)
             wav = make_wav(final_audio, sample_rate)
@@ -969,25 +968,7 @@ B: Sounds amazing!""",
         except Exception as error:
             st.error("Conversation generation failed.")
             st.exception(error)
-)
-
-mp3 = mp3_result.stdout
-
-            st.session_state["final_audio"] = wav
-            st.session_state["final_mp3"] = mp3
-            st.session_state["final_duration"] = (
-                len(final_audio) / sample_rate
-            )
-
-            progress.empty()
-            status.empty()
-
-            st.success("Your conversation is ready!")
-
-        except Exception as error:
-            st.error("Conversation generation failed.")
-            st.exception(error)
-       # -----------------------------------------------------
+    # -----------------------------------------------------
     # FINAL AUDIO
     # -----------------------------------------------------
 
