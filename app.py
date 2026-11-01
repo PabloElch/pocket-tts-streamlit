@@ -966,7 +966,7 @@ B: Sounds amazing!""",
     # FINAL AUDIO
     # -----------------------------------------------------
 
-    if st.session_state.get("final_audio"):
+        if st.session_state.get("final_audio"):
 
         st.divider()
         st.subheader("Your finished conversation")
@@ -981,13 +981,13 @@ B: Sounds amazing!""",
             format="audio/wav",
         )
 
-       st.download_button(
-    "⬇️ Download final conversation (MP3)",
-    data=st.session_state["final_mp3"],
-    file_name="lenchos_studio_conversation.mp3",
-    mime="audio/mpeg",
-    use_container_width=True,
-)
+        st.download_button(
+            "⬇️ Download final conversation (MP3)",
+            data=st.session_state["final_mp3"],
+            file_name="lenchos_studio_conversation.mp3",
+            mime="audio/mpeg",
+            use_container_width=True,
+        )
 
 
 # =========================================================
