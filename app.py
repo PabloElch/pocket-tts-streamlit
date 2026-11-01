@@ -962,11 +962,11 @@ B: Sounds amazing!""",
         except Exception as error:
             st.error("Conversation generation failed.")
             st.exception(error)
-    # -----------------------------------------------------
+       # -----------------------------------------------------
     # FINAL AUDIO
     # -----------------------------------------------------
 
-        if st.session_state.get("final_audio"):
+    if st.session_state.get("final_audio"):
 
         st.divider()
         st.subheader("Your finished conversation")
