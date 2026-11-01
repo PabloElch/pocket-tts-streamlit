@@ -257,6 +257,15 @@ def save_library(voices):
 
 @st.cache_resource
 def load_model():
+    hf_token = st.secrets.get("HF_TOKEN")
+
+    if not hf_token:
+        raise RuntimeError(
+            "HF_TOKEN is missing from Streamlit Secrets."
+        )
+
+    os.environ["HF_TOKEN"] = hf_token
+
     return TTSModel.load_model()
 
 
