@@ -4,3 +4,4 @@ soundfile
 numpy
 librosa
 requests
+pydub
