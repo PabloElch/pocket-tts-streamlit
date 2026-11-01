@@ -7,12 +7,11 @@ import re
 import tempfile
 import uuid
 from urllib.parse import quote
-
+import subprocess
 import librosa
 import numpy as np
 import requests
 import soundfile as sf
-from pydub import AudioSegment
 import streamlit as st
 from pocket_tts import TTSModel
 
@@ -936,17 +935,25 @@ B: Sounds amazing!""",
             final_audio = np.concatenate(parts)
             wav = make_wav(final_audio, sample_rate)
 
-            mp3_buffer = io.BytesIO()
+            mp3_result = subprocess.run(
+    [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel", "error",
+        "-i", "pipe:0",
+        "-vn",
+        "-codec:a", "libmp3lame",
+        "-b:a", "128k",
+        "-f", "mp3",
+        "pipe:1",
+    ],
+    input=wav,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    check=True,
+)
 
-            AudioSegment.from_wav(
-                io.BytesIO(wav)
-            ).export(
-                mp3_buffer,
-                format="mp3",
-                bitrate="128k",
-            )
-
-            mp3 = mp3_buffer.getvalue()
+mp3 = mp3_result.stdout
 
             st.session_state["final_audio"] = wav
             st.session_state["final_mp3"] = mp3
