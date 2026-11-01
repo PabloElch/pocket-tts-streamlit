@@ -702,11 +702,18 @@ if page == "🎭 Voice Library":
 
             preview_key = "preview_" + voice["id"]
 
-            if preview_key in st.session_state:
-                st.audio(
-                    st.session_state[preview_key],
-                    format="audio/wav",
-                )
+           if preview_key in st.session_state:
+    preview_audio = st.session_state[preview_key]
+
+    if isinstance(preview_audio, (bytes, bytearray)):
+        st.audio(
+            bytes(preview_audio),
+            format="audio/wav",
+        )
+    else:
+        st.error(
+            f"Invalid preview audio type: {type(preview_audio).__name__}"
+        )
 
             if st.button(
                 f"Delete {voice['name']}",
