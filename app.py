@@ -931,7 +931,7 @@ B: Sounds amazing!""",
                     (index + 1) / len(turns)
                 )
 
-                        status.write("Combining conversation...")
+            status.write("Combining conversation...")
 
             final_audio = np.concatenate(parts)
             wav = make_wav(final_audio, sample_rate)
