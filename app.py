@@ -670,14 +670,13 @@ if page == "🎭 Voice Library":
 
             st.write(voice["description"])
 
+            
             if st.button(
                 f"▶ Preview {voice['name']}",
-                key=f"preview_{voice['id']}",
+                key=f"preview_button_{voice['id']}",
             ):
-
                 try:
                     with st.spinner("Generating voice preview..."):
-
                         state = get_voice_state(
                             "custom:" + voice["id"],
                             library,
@@ -689,9 +688,9 @@ if page == "🎭 Voice Library":
                             "This is a preview of my saved voice.",
                         )
 
-                        st.session_state[
-                            "preview_" + voice["id"]
-                        ] = make_wav(
+                        audio_key = "preview_audio_" + voice["id"]
+
+                        st.session_state[audio_key] = make_wav(
                             audio,
                             load_model().sample_rate,
                         )
@@ -700,10 +699,10 @@ if page == "🎭 Voice Library":
                     st.error("Preview failed.")
                     st.exception(error)
 
-            preview_key = "preview_" + voice["id"]
+            audio_key = "preview_audio_" + voice["id"]
 
-            if preview_key in st.session_state:
-                preview_audio = st.session_state[preview_key]
+            if audio_key in st.session_state:
+                preview_audio = st.session_state[audio_key]
 
                 if isinstance(preview_audio, (bytes, bytearray)):
                     st.audio(
@@ -711,9 +710,8 @@ if page == "🎭 Voice Library":
                         format="audio/wav",
                     )
                 else:
-                    st.error(
-                        f"Invalid preview audio type: {type(preview_audio).__name__}"
-                    )
+                    st.error("Preview audio data is invalid.")
+
 
             if st.button(
                 f"Delete {voice['name']}",
