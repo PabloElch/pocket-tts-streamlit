@@ -931,24 +931,25 @@ B: Sounds amazing!""",
                     (index + 1) / len(turns)
                 )
 
-            status.write("Combining conversation...")
+                        status.write("Combining conversation...")
 
             final_audio = np.concatenate(parts)
             wav = make_wav(final_audio, sample_rate)
+
             mp3_buffer = io.BytesIO()
 
-AudioSegment.from_wav(
-    io.BytesIO(wav)
-).export(
-    mp3_buffer,
-    format="mp3",
-    bitrate="128k",
-)
+            AudioSegment.from_wav(
+                io.BytesIO(wav)
+            ).export(
+                mp3_buffer,
+                format="mp3",
+                bitrate="128k",
+            )
 
-mp3 = mp3_buffer.getvalue()
+            mp3 = mp3_buffer.getvalue()
 
             st.session_state["final_audio"] = wav
-             st.session_state["final_mp3"] = mp3
+            st.session_state["final_mp3"] = mp3
             st.session_state["final_duration"] = (
                 len(final_audio) / sample_rate
             )
@@ -961,7 +962,6 @@ mp3 = mp3_buffer.getvalue()
         except Exception as error:
             st.error("Conversation generation failed.")
             st.exception(error)
-
     # -----------------------------------------------------
     # FINAL AUDIO
     # -----------------------------------------------------
