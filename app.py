@@ -12,6 +12,7 @@ import librosa
 import numpy as np
 import requests
 import soundfile as sf
+from pydub import AudioSegment
 import streamlit as st
 from pocket_tts import TTSModel
 
@@ -934,8 +935,20 @@ B: Sounds amazing!""",
 
             final_audio = np.concatenate(parts)
             wav = make_wav(final_audio, sample_rate)
+            mp3_buffer = io.BytesIO()
+
+AudioSegment.from_wav(
+    io.BytesIO(wav)
+).export(
+    mp3_buffer,
+    format="mp3",
+    bitrate="128k",
+)
+
+mp3 = mp3_buffer.getvalue()
 
             st.session_state["final_audio"] = wav
+             st.session_state["final_mp3"] = mp3
             st.session_state["final_duration"] = (
                 len(final_audio) / sample_rate
             )
@@ -968,13 +981,13 @@ B: Sounds amazing!""",
             format="audio/wav",
         )
 
-        st.download_button(
-            "⬇️ Download final conversation",
-            data=st.session_state["final_audio"],
-            file_name="lenchos_studio_conversation.wav",
-            mime="audio/wav",
-            use_container_width=True,
-        )
+       st.download_button(
+    "⬇️ Download final conversation (MP3)",
+    data=st.session_state["final_mp3"],
+    file_name="lenchos_studio_conversation.mp3",
+    mime="audio/mpeg",
+    use_container_width=True,
+)
 
 
 # =========================================================
