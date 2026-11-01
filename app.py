@@ -930,27 +930,45 @@ B: Sounds amazing!""",
                     (index + 1) / len(turns)
                 )
 
-            status.write("Combining conversation...")
+                        status.write("Combining conversation...")
 
             final_audio = np.concatenate(parts)
             wav = make_wav(final_audio, sample_rate)
 
             mp3_result = subprocess.run(
-    [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel", "error",
-        "-i", "pipe:0",
-        "-vn",
-        "-codec:a", "libmp3lame",
-        "-b:a", "128k",
-        "-f", "mp3",
-        "pipe:1",
-    ],
-    input=wav,
-    stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
-    check=True,
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel", "error",
+                    "-i", "pipe:0",
+                    "-vn",
+                    "-codec:a", "libmp3lame",
+                    "-b:a", "128k",
+                    "-f", "mp3",
+                    "pipe:1",
+                ],
+                input=wav,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+
+            mp3 = mp3_result.stdout
+
+            st.session_state["final_audio"] = wav
+            st.session_state["final_mp3"] = mp3
+            st.session_state["final_duration"] = (
+                len(final_audio) / sample_rate
+            )
+
+            progress.empty()
+            status.empty()
+
+            st.success("Your conversation is ready!")
+
+        except Exception as error:
+            st.error("Conversation generation failed.")
+            st.exception(error)
 )
 
 mp3 = mp3_result.stdout
