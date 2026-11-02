@@ -1,4 +1,5 @@
 import hmac
+import hashlib
 import io
 import json
 import os
@@ -360,6 +361,26 @@ def make_wav(audio, sample_rate):
 # =========================================================
 # CONVERSATION SCRIPT PARSER
 # =========================================================
+
+def conversation_cache_key(script, voice_a, voice_b, speed_a, speed_b):
+    """Identify reusable chunks for this exact script and voice configuration."""
+    payload = {
+        "script": script,
+        "voice_a": voice_a,
+        "voice_b": voice_b,
+        "speed_a": float(speed_a),
+        "speed_b": float(speed_b),
+        "cache_version": 1,
+    }
+
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+    return hashlib.sha256(encoded).hexdigest()
+
 
 def parse_script(script):
     turns = []
@@ -868,8 +889,26 @@ B: Sounds amazing!""",
         height=260,
     )
 
+    cache_key = conversation_cache_key(
+        script,
+        voice_a,
+        voice_b,
+        speed_a,
+        speed_b,
+    )
+
+    cached_key = st.session_state.get("conversation_cache_key")
+    cached_chunks = st.session_state.get("conversation_chunks", [])
+
+    if cached_key == cache_key and cached_chunks:
+        completed_count = sum(chunk is not None for chunk in cached_chunks)
+        st.caption(
+            f"Saved progress: {completed_count} of {len(cached_chunks)} turns. "
+            "Generate again to resume from the first unfinished turn."
+        )
+
     if st.button(
-        "🎙️ Generate Full Conversation",
+        "🎙️ Generate / Resume Conversation",
         type="primary",
         use_container_width=True,
     ):
@@ -877,6 +916,16 @@ B: Sounds amazing!""",
         try:
             turns = parse_script(script)
 
+            # A changed script, voice, or speed starts a separate cache.
+            # An unchanged setup reuses every successfully generated turn.
+            if (
+                st.session_state.get("conversation_cache_key") != cache_key
+                or len(st.session_state.get("conversation_chunks", [])) != len(turns)
+            ):
+                st.session_state["conversation_cache_key"] = cache_key
+                st.session_state["conversation_chunks"] = [None] * len(turns)
+
+            chunks = st.session_state["conversation_chunks"]
             model = load_model()
 
             with st.spinner("Loading selected voices..."):
@@ -890,24 +939,23 @@ B: Sounds amazing!""",
                 "B": speed_b,
             }
 
-            parts = []
-
             sample_rate = model.sample_rate
-            silence = np.zeros(
-                int(sample_rate * 0.25),
-                dtype=np.float32,
-            )
-
-            progress = st.progress(0)
+            completed_count = sum(chunk is not None for chunk in chunks)
+            progress = st.progress(completed_count / len(turns))
             status = st.empty()
 
             for index, turn in enumerate(turns):
+
+                # Never regenerate a turn that was already completed.
+                if chunks[index] is not None:
+                    continue
 
                 speaker = turn["speaker"]
 
                 status.write(
                     f"Generating turn {index + 1}/{len(turns)} "
-                    f"— Speaker {speaker}"
+                    f"— Speaker {speaker} "
+                    f"({completed_count} already saved)"
                 )
 
                 audio = generate_audio(
@@ -920,16 +968,26 @@ B: Sounds amazing!""",
                     speeds[speaker],
                 )
 
-                parts.append(audio)
+                # Save immediately after each successful turn. Streamlit keeps
+                # session_state across reruns, so a later failure can resume.
+                chunks[index] = audio
+                st.session_state["conversation_chunks"] = chunks
+                completed_count += 1
 
-                if index < len(turns) - 1:
+                progress.progress(completed_count / len(turns))
+
+            status.write("Combining all saved turns...")
+
+            silence = np.zeros(
+                int(sample_rate * 0.25),
+                dtype=np.float32,
+            )
+
+            parts = []
+            for index, chunk in enumerate(chunks):
+                parts.append(chunk)
+                if index < len(chunks) - 1:
                     parts.append(silence)
-
-                progress.progress(
-                    (index + 1) / len(turns)
-                )
-
-            status.write("Combining conversation...")
 
             final_audio = np.concatenate(parts)
             wav = make_wav(final_audio, sample_rate)
@@ -952,22 +1010,29 @@ B: Sounds amazing!""",
                 check=True,
             )
 
-            mp3 = mp3_result.stdout
-
             st.session_state["final_audio"] = wav
-            st.session_state["final_mp3"] = mp3
+            st.session_state["final_mp3"] = mp3_result.stdout
             st.session_state["final_duration"] = (
                 len(final_audio) / sample_rate
             )
+            st.session_state["final_cache_key"] = cache_key
 
             progress.empty()
             status.empty()
 
-            st.success("Your conversation is ready!")
+            st.success(
+                f"Your full conversation is ready! "
+                f"Used {len(turns)} saved/generated turns."
+            )
 
         except Exception as error:
-            st.error("Conversation generation failed.")
+            st.error(
+                "Generation stopped. Your completed turns are saved in this "
+                "session. Click Generate / Resume Conversation again to "
+                "continue from the first unfinished turn."
+            )
             st.exception(error)
+
     # -----------------------------------------------------
     # FINAL AUDIO
     # -----------------------------------------------------
